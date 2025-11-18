@@ -12,20 +12,6 @@ interface Response {
   createdAt: string
 }
 
-interface Issue {
-  id: number
-  userId: number | null
-  userName: string
-  userEmail: string
-  subject: string
-  location: string
-  description: string
-  date: string
-  image: string | null
-  status: string
-  createdAt: string
-}
-
 function Responses() {
   const [responses, setResponses] = useState<Response[]>([])
   const [user, setUser] = useState<any>(null)
@@ -57,24 +43,6 @@ function Responses() {
     }
     loadResponses()
   }, [user])
-
-  const getIssueById = (issueId: number): Issue | null => {
-    const storedIssues = localStorage.getItem('issues')
-    if (storedIssues) {
-      const issues = JSON.parse(storedIssues)
-      return issues.find((issue: Issue) => issue.id === issueId) || null
-    }
-    return null
-  }
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString)
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    })
-  }
 
   const formatDateTime = (dateString: string) => {
     const date = new Date(dateString)
@@ -117,7 +85,6 @@ function Responses() {
       <h2 className="text-2xl font-bold text-gray-800 mb-6">Responses</h2>
       <div className="space-y-6">
         {responses.map((response) => {
-          const issue = getIssueById(response.issueId)
           return (
             <div key={response.id} className="space-y-4">
               {/* Response Card */}
