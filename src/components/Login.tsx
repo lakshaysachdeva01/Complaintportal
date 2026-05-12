@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { apiLogin, rememberUserIdForEmail } from '../api'
 
 interface LoginProps {
   onSwitchToSignup: () => void
@@ -27,12 +28,12 @@ function Login({ onSwitchToSignup, onLoginSuccess }: LoginProps) {
     return () => clearInterval(interval)
   }, [])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setIsLoading(true)
 
-    // Check for admin login
+    // Check for admin login (keeping this for backward compatibility)
     if (email === 'admin@gmail.com' && password === '12345678') {
       setTimeout(() => {
         const adminUser = {
@@ -49,31 +50,69 @@ function Login({ onSwitchToSignup, onLoginSuccess }: LoginProps) {
       return
     }
 
-    // Get stored users from localStorage
-    const storedUsers = localStorage.getItem('users')
-    if (!storedUsers) {
-      setError('No account found. Please create an account first.')
-      setIsLoading(false)
-      return
-    }
+    try {
+      const data = (await apiLogin({
+        email: email.trim(),
+        password,
+      })) as Record<string, unknown>
 
-    const users = JSON.parse(storedUsers)
-    const user = users.find(
-      (u: any) => u.email === email && u.password === password
-    )
-
-    setTimeout(() => {
-      if (user) {
-        // Save current user session
-        localStorage.setItem('currentUser', JSON.stringify(user))
-        localStorage.removeItem('isAdmin')
-        setIsLoading(false)
-        onLoginSuccess()
-      } else {
-        setError('Invalid email or password. Please try again.')
-        setIsLoading(false)
+      const u = (data.user as Record<string, unknown> | undefined) ?? data
+      const id = u.id ?? u.userId ?? data.id ?? data.userId
+      const user = {
+        id: id != null ? Number(id) : undefined,
+        email: String(u.email ?? email.trim()),
+        name: u.name != null ? String(u.name) : undefined,
+        role: String(u.role ?? 'USER'),
       }
-    }, 500)
+
+      if (user.id != null && !Number.isNaN(user.id)) {
+        rememberUserIdForEmail(user.email, user.id)
+      }
+
+      const sessionUser: Record<string, unknown> = {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      }
+      if (typeof u.phone === 'string') sessionUser.phone = u.phone
+      if (typeof u.aadhar === 'string') sessionUser.aadhar = u.aadhar
+
+      localStorage.setItem('currentUser', JSON.stringify(sessionUser))
+      localStorage.removeItem('isAdmin')
+      setIsLoading(false)
+      onLoginSuccess()
+    } catch (err: unknown) {
+      const e = err as Error & { status?: number }
+      const status = e.status
+      const msg = (e.message || '').toLowerCase()
+
+      const looksLikeMissingUser =
+        status === 404 ||
+        msg.includes('not found') ||
+        msg.includes('does not exist') ||
+        msg.includes("doesn't exist") ||
+        msg.includes('no user') ||
+        msg.includes('user not exist') ||
+        msg.includes('not registered')
+
+      if (looksLikeMissingUser) {
+        setError('User does not exist. Please create an account.')
+      } else if (
+        status === 401 ||
+        status === 403 ||
+        msg.includes('password') ||
+        msg.includes('invalid') ||
+        msg.includes('unauthorized') ||
+        msg.includes('bad credentials') ||
+        msg.includes('incorrect')
+      ) {
+        setError('Invalid email or password.')
+      } else {
+        setError(e.message || 'Could not sign in. Please try again.')
+      }
+      setIsLoading(false)
+    }
   }
 
   return (

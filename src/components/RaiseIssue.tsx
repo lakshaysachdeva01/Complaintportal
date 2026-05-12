@@ -1,4 +1,10 @@
 import { useState, useEffect } from 'react'
+import {
+  apiCreateIssue,
+  apiGetDepartments,
+  apiUploadImage,
+  dataUrlToBlob,
+} from '../api'
 
 interface RaiseIssueProps {
   onIssueSubmitted: () => void
@@ -14,12 +20,34 @@ function RaiseIssue({ onIssueSubmitted }: RaiseIssueProps) {
   })
   const [message, setMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [user, setUser] = useState<any>(null)
+  const [departments, setDepartments] = useState<{ id: number; name?: string }[]>([])
+  const [departmentId, setDepartmentId] = useState<number | ''>('')
+  const [user, setUser] = useState<{ id: number; name?: string; email?: string } | null>(null)
 
   useEffect(() => {
     const currentUser = localStorage.getItem('currentUser')
     if (currentUser) {
-      setUser(JSON.parse(currentUser))
+      try {
+        setUser(JSON.parse(currentUser))
+      } catch {
+        setUser(null)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    apiGetDepartments()
+      .then((depts) => {
+        if (cancelled) return
+        setDepartments(depts)
+        if (depts.length === 1) setDepartmentId(depts[0].id)
+      })
+      .catch(() => {
+        if (!cancelled) setMessage('Could not load departments. Try again later.')
+      })
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -55,7 +83,7 @@ function RaiseIssue({ onIssueSubmitted }: RaiseIssueProps) {
     }
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setMessage('')
 
@@ -81,36 +109,50 @@ function RaiseIssue({ onIssueSubmitted }: RaiseIssueProps) {
       return
     }
 
-    setIsLoading(true)
-
-    // Get existing issues from localStorage
-    const storedIssues = localStorage.getItem('issues')
-    const issues = storedIssues ? JSON.parse(storedIssues) : []
-
-    // Create new issue
-    const newIssue = {
-      id: Date.now(),
-      userId: user?.id || null,
-      userName: user?.name || 'Unknown',
-      userEmail: user?.email || '',
-      subject: formData.subject,
-      location: formData.location,
-      description: formData.description,
-      date: formData.date,
-      image: formData.image,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
+    if (departments.length > 0 && departmentId === '') {
+      setMessage('Please select a department')
+      setTimeout(() => setMessage(''), 3000)
+      return
     }
 
-    // Save to localStorage
-    issues.push(newIssue)
-    localStorage.setItem('issues', JSON.stringify(issues))
+    if (!user?.id) {
+      setMessage('You must be signed in to submit an issue')
+      setTimeout(() => setMessage(''), 3000)
+      return
+    }
 
-    setTimeout(() => {
+    const deptId = departmentId === '' ? departments[0]?.id : departmentId
+    if (deptId == null) {
+      setMessage('No department is available. Cannot submit.')
+      setTimeout(() => setMessage(''), 3000)
+      return
+    }
+
+    setIsLoading(true)
+
+    try {
+      let imageTag: string | null = null
+      if (formData.image) {
+        try {
+          const blob = dataUrlToBlob(formData.image)
+          imageTag = await apiUploadImage(blob, 'issue-evidence.jpg')
+        } catch {
+          /* optional image — continue without tag */
+        }
+      }
+
+      const issueBody = `Subject: ${formData.subject.trim()}\n\n${formData.description.trim()}`
+      await apiCreateIssue({
+        reporterId: Number(user.id),
+        departmentId: Number(deptId),
+        message: issueBody,
+        location: formData.location.trim(),
+        imageTag: imageTag || undefined,
+      })
+
       setIsLoading(false)
       setMessage('Thank you! Your issue has been submitted successfully.')
       setTimeout(() => {
-        // Reset form
         setFormData({
           subject: '',
           location: '',
@@ -121,7 +163,11 @@ function RaiseIssue({ onIssueSubmitted }: RaiseIssueProps) {
         setMessage('')
         onIssueSubmitted()
       }, 2000)
-    }, 500)
+    } catch (err: any) {
+      setIsLoading(false)
+      setMessage(err?.message || 'Failed to submit issue. Please try again.')
+      setTimeout(() => setMessage(''), 5000)
+    }
   }
 
   const removeImage = () => {
@@ -196,6 +242,31 @@ function RaiseIssue({ onIssueSubmitted }: RaiseIssueProps) {
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition duration-200"
               />
             </div>
+
+            {departments.length > 0 && (
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Department <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={departmentId === '' ? '' : String(departmentId)}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setDepartmentId(v === '' ? '' : Number(v))
+                    setMessage('')
+                  }}
+                  required
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition duration-200"
+                >
+                  {departments.length > 1 && <option value="">Select department</option>}
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name || `Department ${d.id}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">

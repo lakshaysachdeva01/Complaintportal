@@ -1,54 +1,94 @@
 import { useState, useEffect } from 'react'
+import {
+  apiGetIssues,
+  apiGetUser,
+  mapApiIssueToUi,
+  mapEmbeddedIssueToUi,
+  type UiIssue,
+} from '../api'
 
-interface Issue {
-  id: number
-  userId: number | null
-  userName: string
-  userEmail: string
-  subject: string
-  location: string
-  description: string
-  date: string
-  image: string | null
-  status: string
-  createdAt: string
+type Issue = UiIssue
+
+function readSessionIds(): { userId: number | null; emailNorm: string | null } {
+  const raw = localStorage.getItem('currentUser')
+  if (!raw) return { userId: null, emailNorm: null }
+  try {
+    const u = JSON.parse(raw)
+    const id = u?.id
+    const userId =
+      id != null && id !== 'admin' && !Number.isNaN(Number(id)) ? Number(id) : null
+    const emailNorm =
+      typeof u?.email === 'string' ? u.email.trim().toLowerCase() : null
+    return { userId, emailNorm }
+  } catch {
+    return { userId: null, emailNorm: null }
+  }
 }
 
 function IssuesRaised() {
   const [issues, setIssues] = useState<Issue[]>([])
-  const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser')
-    if (currentUser) {
-      const userData = JSON.parse(currentUser)
-      setUser(userData)
-    }
-  }, [])
+    const loadIssues = async () => {
+      try {
+        const { userId, emailNorm } = readSessionIds()
 
-  useEffect(() => {
-    const loadIssues = () => {
-      const storedIssues = localStorage.getItem('issues')
-      if (storedIssues) {
-        const allIssues = JSON.parse(storedIssues)
-        // Filter issues for current user
-        if (user) {
-          const userIssues = allIssues.filter((issue: Issue) => issue.userId === user.id)
-          // Sort by newest first
-          userIssues.sort((a: Issue, b: Issue) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          setIssues(userIssues)
-        } else {
-          const sortedIssues = allIssues.sort((a: Issue, b: Issue) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          setIssues(sortedIssues)
+        if (userId != null) {
+          try {
+            const user = await apiGetUser(userId)
+            const embedded = user.issues
+            if (Array.isArray(embedded) && embedded.length > 0) {
+              const list = embedded.map((iss) =>
+                mapEmbeddedIssueToUi(iss, {
+                  id: user.id,
+                  name: user.name,
+                  email: user.email,
+                }),
+              )
+              list.sort(
+                (a, b) =>
+                  new Date(b.createdAt).getTime() -
+                  new Date(a.createdAt).getTime(),
+              )
+              setIssues(list)
+              return
+            }
+          } catch {
+            /* use /issues fallback below */
+          }
         }
+
+        const raw = await apiGetIssues()
+        const mapped = raw.map(mapApiIssueToUi)
+
+        const list = mapped.filter((issue) => {
+          if (userId != null && Number(issue.userId) === userId) return true
+          if (
+            emailNorm &&
+            (issue.userEmail || '').trim().toLowerCase() === emailNorm
+          )
+            return true
+          return false
+        })
+
+        list.sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        )
+        setIssues(list)
+      } catch {
+        setIssues([])
       }
     }
+
     loadIssues()
-    
-    // Refresh issues every 2 seconds to catch admin updates
-    const interval = setInterval(loadIssues, 2000)
-    return () => clearInterval(interval)
-  }, [user])
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadIssues()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
@@ -93,7 +133,6 @@ function IssuesRaised() {
             key={issue.id}
             className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg transition duration-200 flex gap-6"
           >
-            {/* Image on the left */}
             {issue.image ? (
               <div className="flex-shrink-0">
                 <img
@@ -120,7 +159,6 @@ function IssuesRaised() {
               </div>
             )}
 
-            {/* Text content on the right */}
             <div className="flex-1 min-w-0">
               <div className="flex justify-between items-start mb-3">
                 <h3 className="text-xl font-semibold text-gray-800 mb-2 line-clamp-1 text-ellipsis">
@@ -128,14 +166,18 @@ function IssuesRaised() {
                 </h3>
                 <span
                   className={`px-3 py-1 rounded-full text-xs font-medium flex-shrink-0 ml-3 ${
-                    issue.status === 'pending'
+                    issue.status === 'pending' || issue.status === 'in_progress'
                       ? 'bg-yellow-100 text-yellow-800'
                       : issue.status === 'resolved'
                       ? 'bg-green-100 text-green-800'
-                      : 'bg-red-100 text-red-800'
+                      : issue.status === 'new'
+                      ? 'bg-red-100 text-red-800'
+                      : 'bg-gray-100 text-gray-800'
                   }`}
                 >
-                  {issue.status.charAt(0).toUpperCase() + issue.status.slice(1)}
+                  {issue.status === 'in_progress'
+                    ? 'In progress'
+                    : issue.status.charAt(0).toUpperCase() + issue.status.slice(1)}
                 </span>
               </div>
 

@@ -1,190 +1,116 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import {
+  apiGetIssues,
+  apiUpdateIssueStatus,
+  mapApiIssueToUi,
+  uiStatusToApi,
+  verifyIssueStatusQueryWorks,
+  type UiIssue,
+} from '../api'
 
 interface AdminDashboardProps {
   onLogout: () => void
 }
 
-type Tab = 'home' | 'all' | 'resolved' | 'pending' | 'sent'
+type Tab = 'home' | 'all' | 'resolved' | 'pending'
 
-interface Issue {
-  id: number
-  userId: number | null
-  userName: string
-  userEmail: string
-  subject: string
-  location: string
-  description: string
-  date: string
-  image: string | null
-  status: string
-  createdAt: string
-}
+type Issue = UiIssue
 
 function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<Tab>('home')
   const [issues, setIssues] = useState<Issue[]>([])
-  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null)
-  const [showResponseModal, setShowResponseModal] = useState(false)
-  const [responses, setResponses] = useState<any[]>([])
+  const [resolvedFromServer, setResolvedFromServer] = useState<Issue[] | null>(null)
+  const [pendingFromServer, setPendingFromServer] = useState<Issue[] | null>(null)
+  const statusQueryVerifiedRef = useRef(false)
+  const statusQueryWorksRef = useRef(false)
+  const statusUpdateInFlightRef = useRef<Set<number>>(new Set())
 
-  const loadIssues = () => {
-    const storedIssues = localStorage.getItem('issues')
-    if (storedIssues) {
-      const allIssues = JSON.parse(storedIssues)
-      // Sort by newest first
-      allIssues.sort((a: Issue, b: Issue) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      setIssues(allIssues)
+  const sortDesc = (list: Issue[]) =>
+    [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+
+  const refreshIssues = useCallback(async () => {
+    const fullRaw = await apiGetIssues()
+    let works = statusQueryWorksRef.current
+
+    if (!statusQueryVerifiedRef.current) {
+      statusQueryVerifiedRef.current = true
+      works = await verifyIssueStatusQueryWorks(fullRaw)
+      statusQueryWorksRef.current = works
     }
-  }
 
-  const loadResponses = () => {
-    const storedResponses = localStorage.getItem('responses')
-    if (storedResponses) {
-      const allResponses = JSON.parse(storedResponses)
-      // Filter only admin responses (sent by admin)
-      const adminResponses = allResponses.filter((r: any) => r.from === 'Municipal Corporation')
-      // Sort by newest first
-      adminResponses.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      setResponses(adminResponses)
-    }
-  }
+    const full = sortDesc(fullRaw.map(mapApiIssueToUi))
+    setIssues(full)
 
-  const initializeStaticIssues = () => {
-    const storedIssues = localStorage.getItem('issues')
-    const staticIssueIds = [1001, 1002, 1003, 1004, 1005, 1006]
-    
-    const createStaticIssues = (): Issue[] => [
-      {
-        id: 1001,
-        userId: null,
-        userName: 'Demo User 1',
-        userEmail: 'demo1@example.com',
-        subject: 'Broken Street Light on Main Road',
-        location: 'Main Road, Sector 5',
-        description: 'Street light number 45 is not working. It has been dark for the past week, causing safety concerns for pedestrians.',
-        date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        image: null,
-        status: 'new',
-        createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 1002,
-        userId: null,
-        userName: 'Demo User 2',
-        userEmail: 'demo2@example.com',
-        subject: 'Garbage Not Collected',
-        location: 'Park Street, Block A',
-        description: 'Garbage has not been collected for the past 5 days. The bins are overflowing and causing foul smell in the area.',
-        date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        image: null,
-        status: 'in_progress',
-        createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 1003,
-        userId: null,
-        userName: 'Demo User 3',
-        userEmail: 'demo3@example.com',
-        subject: 'Pothole on Highway',
-        location: 'Highway Road, KM 12',
-        description: 'Large pothole near the highway exit. Multiple vehicles have been damaged. Needs immediate attention.',
-        date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        image: null,
-        status: 'resolved',
-        createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 1004,
-        userId: null,
-        userName: 'Demo User 4',
-        userEmail: 'demo4@example.com',
-        subject: 'Water Leakage in Public Park',
-        location: 'Central Park, Zone 3',
-        description: 'Water pipe is leaking near the children play area. Water is being wasted and creating slippery conditions.',
-        date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        image: null,
-        status: 'pending',
-        createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 1005,
-        userId: null,
-        userName: 'Demo User 5',
-        userEmail: 'demo5@example.com',
-        subject: 'Illegal Parking on No-Parking Zone',
-        location: 'Market Street, Near Hospital',
-        description: 'Vehicles are regularly parked in no-parking zone blocking emergency vehicle access to the hospital.',
-        date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        image: null,
-        status: 'resolved',
-        createdAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 1006,
-        userId: null,
-        userName: 'Demo User 6',
-        userEmail: 'demo6@example.com',
-        subject: 'Damaged Footpath',
-        location: 'School Road, Block B',
-        description: 'Footpath tiles are broken and uneven, making it difficult for pedestrians, especially elderly and children.',
-        date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        image: null,
-        status: 'pending',
-        createdAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-    ]
-    
-    if (!storedIssues) {
-      // Create all static issues if no issues exist
-      const staticIssues = createStaticIssues()
-      localStorage.setItem('issues', JSON.stringify(staticIssues))
+    if (works) {
+      const [cRaw, pRaw, ipRaw] = await Promise.all([
+        apiGetIssues('COMPLETED'),
+        apiGetIssues('PENDING'),
+        apiGetIssues('IN_PROCESS'),
+      ])
+      setResolvedFromServer(sortDesc(cRaw.map(mapApiIssueToUi)))
+      setPendingFromServer(sortDesc([...pRaw, ...ipRaw].map(mapApiIssueToUi)))
     } else {
-      // Merge missing static issues with existing ones
-      const existingIssues = JSON.parse(storedIssues)
-      const existingStaticIds = existingIssues.map((issue: Issue) => issue.id)
-      const missingStaticIds = staticIssueIds.filter(id => !existingStaticIds.includes(id))
-      
-      if (missingStaticIds.length > 0) {
-        const allStaticIssues = createStaticIssues()
-        const staticIssuesToAdd = allStaticIssues.filter(issue => missingStaticIds.includes(issue.id))
-        const mergedIssues = [...existingIssues, ...staticIssuesToAdd]
-        localStorage.setItem('issues', JSON.stringify(mergedIssues))
-      }
+      setResolvedFromServer(null)
+      setPendingFromServer(null)
     }
-  }
-
-  useEffect(() => {
-    initializeStaticIssues()
-    loadIssues()
-    loadResponses()
-    
-    // Refresh issues every 2 seconds to catch new user submissions
-    const interval = setInterval(() => {
-      loadIssues()
-      loadResponses()
-    }, 2000)
-    return () => clearInterval(interval)
   }, [])
 
-  const updateIssueStatus = (issueId: number, newStatus: string) => {
-    const updatedIssues = issues.map((issue) =>
-      issue.id === issueId ? { ...issue, status: newStatus } : issue
-    )
-    setIssues(updatedIssues)
-    localStorage.setItem('issues', JSON.stringify(updatedIssues))
-    
-    // Also update responses if they exist
-    const storedResponses = localStorage.getItem('responses')
-    if (storedResponses) {
-      const responses = JSON.parse(storedResponses)
-      const updatedResponses = responses.map((response: any) => {
-        if (response.issueId === issueId) {
-          // Update response message if status changed
-          return response
+  useEffect(() => {
+    const sync = () => {
+      refreshIssues().catch(() => {})
+    }
+    sync()
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') sync()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [refreshIssues])
+
+  const updateIssueStatus = async (issue: Issue, newStatus: string) => {
+    if (newStatus === issue.status) return
+
+    const issueId = issue.id
+    if (statusUpdateInFlightRef.current.has(issueId)) return
+    statusUpdateInFlightRef.current.add(issueId)
+
+    const reporterId =
+      issue.userId != null && !Number.isNaN(Number(issue.userId))
+        ? Number(issue.userId)
+        : null
+
+    const FALLBACK_A = 5
+    const FALLBACK_B = 11
+
+    const firstUserId = reporterId ?? FALLBACK_A
+    const secondUserId =
+      firstUserId === FALLBACK_A
+        ? FALLBACK_B
+        : firstUserId === FALLBACK_B
+          ? FALLBACK_A
+          : FALLBACK_A
+
+    const userIdsToTry =
+      firstUserId === secondUserId ? [firstUserId] : [firstUserId, secondUserId]
+
+    try {
+      for (const userId of userIdsToTry) {
+        try {
+          await apiUpdateIssueStatus({
+            userId,
+            id: Number(issueId),
+            status: uiStatusToApi(newStatus),
+          })
+          break
+        } catch {
+          /* try next userId (e.g. 5 ↔ 11) */
         }
-        return response
-      })
-      localStorage.setItem('responses', JSON.stringify(updatedResponses))
+      }
+
+      await refreshIssues().catch(() => {})
+    } finally {
+      statusUpdateInFlightRef.current.delete(issueId)
     }
   }
 
@@ -213,8 +139,11 @@ function AdminDashboard({ onLogout }: AdminDashboardProps) {
   }
 
   const newIssues = issues.filter((issue) => issue.status === 'new')
-  const resolvedIssues = issues.filter((issue) => issue.status === 'resolved')
-  const pendingIssues = issues.filter((issue) => issue.status === 'pending' || issue.status === 'in_progress')
+  const resolvedIssues =
+    resolvedFromServer ?? issues.filter((issue) => issue.status === 'resolved')
+  const pendingIssues =
+    pendingFromServer ??
+    issues.filter((issue) => issue.status === 'pending' || issue.status === 'in_progress')
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -307,20 +236,6 @@ function AdminDashboard({ onLogout }: AdminDashboardProps) {
             </svg>
             <span>Pending</span>
           </button>
-
-          <button
-            onClick={() => setActiveTab('sent')}
-            className={`w-full text-left px-4 py-3 rounded-lg transition duration-200 flex items-center space-x-3 ${
-              activeTab === 'sent'
-                ? 'bg-indigo-50 text-indigo-600 font-medium'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
-            <span>Sent</span>
-          </button>
         </nav>
 
         {/* Logout Button */}
@@ -350,7 +265,7 @@ function AdminDashboard({ onLogout }: AdminDashboardProps) {
               ) : (
                 <div className="space-y-4">
                   {newIssues.map((issue) => (
-                    <IssueCard key={issue.id} issue={issue} onStatusUpdate={updateIssueStatus} formatDate={formatDate} getStatusBadgeColor={getStatusBadgeColor} onOpenResponse={(issue) => { setSelectedIssue(issue); setShowResponseModal(true); }} />
+                    <IssueCard key={issue.id} issue={issue} onStatusUpdate={updateIssueStatus} formatDate={formatDate} getStatusBadgeColor={getStatusBadgeColor} />
                   ))}
                 </div>
               )}
@@ -362,7 +277,7 @@ function AdminDashboard({ onLogout }: AdminDashboardProps) {
               <h2 className="text-3xl font-bold text-gray-800 mb-6">All Issues</h2>
               <div className="space-y-4">
                 {issues.map((issue) => (
-                  <IssueCard key={issue.id} issue={issue} onStatusUpdate={updateIssueStatus} formatDate={formatDate} getStatusBadgeColor={getStatusBadgeColor} onOpenResponse={(issue) => { setSelectedIssue(issue); setShowResponseModal(true); }} />
+                  <IssueCard key={issue.id} issue={issue} onStatusUpdate={updateIssueStatus} formatDate={formatDate} getStatusBadgeColor={getStatusBadgeColor} />
                 ))}
               </div>
             </div>
@@ -378,7 +293,7 @@ function AdminDashboard({ onLogout }: AdminDashboardProps) {
               ) : (
                 <div className="space-y-4">
                   {resolvedIssues.map((issue) => (
-                    <IssueCard key={issue.id} issue={issue} onStatusUpdate={updateIssueStatus} formatDate={formatDate} getStatusBadgeColor={getStatusBadgeColor} onOpenResponse={(issue) => { setSelectedIssue(issue); setShowResponseModal(true); }} />
+                    <IssueCard key={issue.id} issue={issue} onStatusUpdate={updateIssueStatus} formatDate={formatDate} getStatusBadgeColor={getStatusBadgeColor} />
                   ))}
                 </div>
               )}
@@ -395,224 +310,13 @@ function AdminDashboard({ onLogout }: AdminDashboardProps) {
               ) : (
                 <div className="space-y-4">
                   {pendingIssues.map((issue) => (
-                    <IssueCard key={issue.id} issue={issue} onStatusUpdate={updateIssueStatus} formatDate={formatDate} getStatusBadgeColor={getStatusBadgeColor} onOpenResponse={(issue) => { setSelectedIssue(issue); setShowResponseModal(true); }} />
+                    <IssueCard key={issue.id} issue={issue} onStatusUpdate={updateIssueStatus} formatDate={formatDate} getStatusBadgeColor={getStatusBadgeColor} />
                   ))}
                 </div>
               )}
             </div>
           )}
-
-          {activeTab === 'sent' && (
-            <div>
-              <h2 className="text-3xl font-bold text-gray-800 mb-6">Sent Responses</h2>
-              {responses.length === 0 ? (
-                <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-                  <p className="text-gray-500 text-lg">No responses sent yet</p>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {responses.map((response) => {
-                    const issue = issues.find((i) => i.id === response.issueId)
-                    return (
-                      <div key={response.id} className="space-y-4">
-                        {/* Response Card */}
-                        <div className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg transition duration-200">
-                          <div className="mb-4">
-                            <h3 className="text-xl font-bold text-indigo-600 mb-3">
-                              From : Municipal Corp
-                            </h3>
-                            <h4 className="text-lg font-semibold text-gray-800 mb-3">
-                              Re: {response.subject}
-                            </h4>
-                            <div className="mb-4">
-                              <p className="text-sm font-medium text-gray-600 mb-2">Response:</p>
-                              <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
-                                {response.message}
-                              </p>
-                            </div>
-                            <div className="text-xs text-gray-500 pt-3 border-t border-gray-200">
-                              Sent on {formatDateTime(response.createdAt)}
-                            </div>
-                            
-                          </div>
-                          
-                        {/* Original Issue Card */}
-                        {issue && (
-                          <div className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg transition duration-200 flex gap-6">
-                            {issue.image ? (
-                              <div className="flex-shrink-0">
-                                <img
-                                  src={issue.image}
-                                  alt="Issue evidence"
-                                  className="w-[200px] h-[160px] object-cover rounded-lg border border-gray-300"
-                                />
-                              </div>
-                            ) : (
-                              <div className="flex-shrink-0 w-[200px] h-[160px] bg-gray-100 rounded-lg border border-gray-300 flex items-center justify-center">
-                                <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                              </div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex justify-between items-start mb-3">
-                                <h3 className="text-xl font-semibold text-gray-800 mb-2 line-clamp-1 text-ellipsis">
-                                  {issue.subject}
-                                </h3>
-                                <span className={`px-3 py-1 rounded-full text-xs font-medium flex-shrink-0 ml-3 ${getStatusBadgeColor(issue.status)}`}>
-                                  {issue.status === 'new' ? 'New' : issue.status === 'in_progress' ? 'In Progress' : issue.status.charAt(0).toUpperCase() + issue.status.slice(1)}
-                                </span>
-                              </div>
-                              <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-4">
-                                <div className="flex items-center space-x-1">
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                                  </svg>
-                                  <span>{issue.location}</span>
-                                </div>
-                                <div className="flex items-center space-x-1">
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                  </svg>
-                                  <span>{formatDate(issue.date)}</span>
-                                </div>
-                              </div>
-                              <p className="text-gray-700 mb-4 whitespace-pre-wrap line-clamp-2 text-ellipsis">{issue.description}</p>
-                              <div className="text-xs text-gray-500 pt-3 border-t border-gray-200">
-                                Submitted on {formatDate(issue.createdAt)}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        </div>
-
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )}
         </div>
-      </div>
-
-      {/* Response Modal */}
-      {showResponseModal && selectedIssue && (
-        <ResponseModal
-          issue={selectedIssue}
-          onClose={() => {
-            setShowResponseModal(false)
-            setSelectedIssue(null)
-          }}
-          onSend={(message) => {
-            const storedResponses = localStorage.getItem('responses')
-            const allResponses = storedResponses ? JSON.parse(storedResponses) : []
-
-            const newResponse = {
-              id: Date.now(),
-              issueId: selectedIssue.id,
-              userId: selectedIssue.userId,
-              from: 'Municipal Corporation',
-              message: message,
-              image: selectedIssue.image,
-              subject: selectedIssue.subject,
-              location: selectedIssue.location,
-              createdAt: new Date().toISOString(),
-            }
-
-            allResponses.push(newResponse)
-            localStorage.setItem('responses', JSON.stringify(allResponses))
-            loadResponses()
-            setShowResponseModal(false)
-            setSelectedIssue(null)
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-interface ResponseModalProps {
-  issue: Issue
-  onClose: () => void
-  onSend: (message: string) => void
-}
-
-const formatDateTime = (dateString: string) => {
-  const date = new Date(dateString)
-  return date.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function ResponseModal({ issue, onClose, onSend }: ResponseModalProps) {
-  const [message, setMessage] = useState('')
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (message.trim()) {
-      onSend(message.trim())
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg shadow-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold text-gray-800">Send Response</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 transition duration-200"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-          <p className="text-sm font-medium text-gray-600 mb-1">Issue:</p>
-          <p className="text-gray-800 font-semibold">{issue.subject}</p>
-          <p className="text-sm text-gray-600 mt-1">Location: {issue.location}</p>
-          <p className="text-sm text-gray-600">From: {issue.userName} ({issue.userEmail})</p>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Response Message
-            </label>
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              required
-              rows={8}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition duration-200 resize-none"
-              placeholder="Type your response message here..."
-            />
-          </div>
-
-          <div className="flex justify-end space-x-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition duration-200"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition duration-200 shadow-md hover:shadow-lg"
-            >
-              Send Response
-            </button>
-          </div>
-        </form>
       </div>
     </div>
   )
@@ -620,13 +324,12 @@ function ResponseModal({ issue, onClose, onSend }: ResponseModalProps) {
 
 interface IssueCardProps {
   issue: Issue
-  onStatusUpdate: (id: number, status: string) => void
+  onStatusUpdate: (issue: Issue, status: string) => void
   formatDate: (date: string) => string
   getStatusBadgeColor: (status: string) => string
-  onOpenResponse: (issue: Issue) => void
 }
 
-function IssueCard({ issue, onStatusUpdate, formatDate, getStatusBadgeColor, onOpenResponse }: IssueCardProps) {
+function IssueCard({ issue, onStatusUpdate, formatDate, getStatusBadgeColor }: IssueCardProps) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg transition duration-200 flex gap-6">
       {/* Image on the left */}
@@ -681,13 +384,13 @@ function IssueCard({ issue, onStatusUpdate, formatDate, getStatusBadgeColor, onO
 
         <p className="text-gray-700 mb-4 whitespace-pre-wrap line-clamp-2 text-ellipsis">{issue.description}</p>
 
-        {/* Status Update and Message Button */}
-        <div className="flex items-center justify-between mb-3">
+        {/* Status update */}
+        <div className="flex items-center mb-3">
           <div className="flex items-center space-x-3">
             <label className="text-sm font-medium text-gray-700">Update Status:</label>
             <select
               value={issue.status}
-              onChange={(e) => onStatusUpdate(issue.id, e.target.value)}
+              onChange={(e) => onStatusUpdate(issue, e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm"
             >
               <option value="new">New</option>
@@ -696,15 +399,6 @@ function IssueCard({ issue, onStatusUpdate, formatDate, getStatusBadgeColor, onO
               <option value="resolved">Resolved</option>
             </select>
           </div>
-          <button
-            onClick={() => onOpenResponse(issue)}
-            className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition duration-200 shadow-md hover:shadow-lg"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
-            <span>Respond</span>
-          </button>
         </div>
 
         <div className="text-xs text-gray-500 pt-3 border-t border-gray-200">

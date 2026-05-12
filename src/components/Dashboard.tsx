@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react'
 import Profile from './Profile'
 import IssuesRaised from './IssuesRaised'
-import Responses from './Responses'
 import RaiseIssue from './RaiseIssue'
 
 interface DashboardProps {
   onLogout: () => void
 }
 
-type Tab = 'home' | 'profile' | 'issues' | 'responses'
+type Tab = 'home' | 'profile' | 'issues'
 
 function Dashboard({ onLogout }: DashboardProps) {
   const [user, setUser] = useState<any>(null)
@@ -141,30 +140,6 @@ function Dashboard({ onLogout }: DashboardProps) {
             </svg>
             <span>Issues Raised</span>
           </button>
-
-          <button
-            onClick={() => setActiveTab('responses')}
-            className={`w-full text-left px-4 py-3 rounded-lg transition duration-200 flex items-center space-x-3 ${
-              activeTab === 'responses'
-                ? 'bg-indigo-50 text-indigo-600 font-medium'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-              />
-            </svg>
-            <span>Responses</span>
-          </button>
         </nav>
 
         {/* Logout Button */}
@@ -197,7 +172,6 @@ function Dashboard({ onLogout }: DashboardProps) {
           {activeTab === 'home' && <RaiseIssue onIssueSubmitted={() => setActiveTab('issues')} />}
           {activeTab === 'profile' && <Profile user={user} onUpdate={loadUser} />}
           {activeTab === 'issues' && <IssuesRaised />}
-          {activeTab === 'responses' && <Responses />}
         </div>
       </div>
     </div>

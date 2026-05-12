@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { apiCreateUser, apiGetDepartments, rememberUserIdForEmail } from '../api'
 
 interface SignupProps {
   onSwitchToLogin: () => void
@@ -6,6 +7,20 @@ interface SignupProps {
 }
 
 function Signup({ onSwitchToLogin, onSignupSuccess }: SignupProps) {
+  const [defaultDepartmentId, setDefaultDepartmentId] = useState<number | undefined>(undefined)
+
+  useEffect(() => {
+    let cancelled = false
+    apiGetDepartments()
+      .then((depts) => {
+        if (!cancelled && depts.length > 0) setDefaultDepartmentId(depts[0].id)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -31,11 +46,11 @@ function Signup({ onSwitchToLogin, onSignupSuccess }: SignupProps) {
       setError('Please enter a valid email address')
       return false
     }
-    if (!/^[0-9]{10}$/.test(formData.phone)) {
+    if (formData.phone && !/^[0-9]{10}$/.test(formData.phone)) {
       setError('Phone number must be exactly 10 digits')
       return false
     }
-    if (!/^[0-9]{12}$/.test(formData.aadhar)) {
+    if (formData.aadhar && !/^[0-9]{12}$/.test(formData.aadhar)) {
       setError('Aadhar number must be exactly 12 digits')
       return false
     }
@@ -46,7 +61,7 @@ function Signup({ onSwitchToLogin, onSignupSuccess }: SignupProps) {
     return true
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
@@ -56,32 +71,32 @@ function Signup({ onSwitchToLogin, onSignupSuccess }: SignupProps) {
 
     setIsLoading(true)
 
-    // Get existing users from localStorage
-    const storedUsers = localStorage.getItem('users')
-    const users = storedUsers ? JSON.parse(storedUsers) : []
+    try {
+      const data = await apiCreateUser({
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        role: 'USER',
+        ...(defaultDepartmentId != null ? { departmentId: defaultDepartmentId } : {}),
+      })
 
-    // Check if email already exists
-    const emailExists = users.some((u: any) => u.email === formData.email)
-    if (emailExists) {
-      setError('An account with this email already exists. Please login instead.')
-      setIsLoading(false)
-      return
-    }
+      rememberUserIdForEmail(formData.email, data.id)
 
-    // Save new user
-    setTimeout(() => {
       const newUser = {
-        id: Date.now(),
-        ...formData,
+        id: data.id,
+        name: data.name ?? formData.name,
+        email: data.email ?? formData.email,
+        role: data.role ?? 'USER',
+        ...(formData.phone && { phone: formData.phone }),
+        ...(formData.aadhar && { aadhar: formData.aadhar }),
       }
-      users.push(newUser)
-      localStorage.setItem('users', JSON.stringify(users))
-
-      // Save as current user
       localStorage.setItem('currentUser', JSON.stringify(newUser))
       setIsLoading(false)
       onSignupSuccess()
-    }, 500)
+    } catch (err: any) {
+      setError(err.message || 'An error occurred. Please try again.')
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -156,10 +171,9 @@ function Signup({ onSwitchToLogin, onSignupSuccess }: SignupProps) {
                 setFormData((prev) => ({ ...prev, phone: value }))
                 setError('')
               }}
-              required
               maxLength={10}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition duration-200"
-              placeholder="Enter 10-digit phone number"
+              placeholder="Enter 10-digit phone number (optional)"
             />
           </div>
 
@@ -180,10 +194,9 @@ function Signup({ onSwitchToLogin, onSignupSuccess }: SignupProps) {
                 setFormData((prev) => ({ ...prev, aadhar: value }))
                 setError('')
               }}
-              required
               maxLength={12}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition duration-200"
-              placeholder="Enter 12-digit Aadhar number"
+              placeholder="Enter 12-digit Aadhar number (optional)"
             />
           </div>
 
